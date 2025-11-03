@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 // Assuming your Flask backend is running on the same machine on port 5000
 // When deploying, replace 'localhost' with your public HTTPS/Ngrok URL (e.g., 'https://your-ngrok-domain.app')
-const BACKEND_URL = 'https://3d74a0e0cdc0.ngrok-free.app'; 
+const BACKEND_URL = 'https://ff01d1a3dd7e.ngrok-free.app'; 
 const VIDEO_FEED_URL = `${BACKEND_URL}/video_feed`;
 const STATUS_URL = `${BACKEND_URL}/status`;
-const STATUS_INTERVAL_MS = 1000; // Check status every 1 second
+const STATUS_INTERVAL_MS = 1000;
 
 function CameraFeed() {
     const [isServiceRunning, setIsServiceRunning] = useState(false);
