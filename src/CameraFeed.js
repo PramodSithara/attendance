@@ -2,8 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 
 // Backend runs on local network
 const BACKEND_IP = "https://3d74a0e0cdc0.ngrok-free.app"; // ⚠️ CHANGE THIS TO YOUR IP!
-const STATUS_URL = `http://${BACKEND_IP}/status`;
-const UPLOAD_URL = `http://${BACKEND_IP}/process_frame`;
+const STATUS_URL = `${BACKEND_IP}/status`;
+const UPLOAD_URL = `${BACKEND_IP}/process_frame`;
 
 function CameraFeed() {
     const [isServiceRunning, setIsServiceRunning] = useState(false);
