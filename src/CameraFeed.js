@@ -1,197 +1,142 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-// Assuming your original CSS is in './App.css'
-import './App.css'; 
-
-// --- Configuration Constants ---
-// NOTE: Ngrok runs the web server on a standard HTTPS port (443), so you typically 
-// don't include the Flask port (5000) in the URL itself.
-// The Ngrok URL must be the one mapping to your Flask server (port 5000).
-const NG_ROK_DOMAIN = "3d74a0e0cdc0.ngrok-free.app"; // Replace with your current Ngrok domain (e.g., xxx.ngrok-free.app)
-
-// All endpoints must use HTTPS.
-const UPLOAD_URL = `https://${NG_ROK_DOMAIN}/process_frame`; 
-
-// Frame rate control (e.g., 5 frames per second = 200ms interval)
-const FRAME_INTERVAL_MS = 200; 
-// ------------------------------------
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+// Assuming your Flask backend is running on the same machine on port 5000
+// When deploying, replace 'localhost' with your public HTTPS/Ngrok URL (e.g., 'https://your-ngrok-domain.app')
+const BACKEND_URL = 'https://3d74a0e0cdc0.ngrok-free.app'; 
+const VIDEO_FEED_URL = `${BACKEND_URL}/video_feed`;
+const STATUS_URL = `${BACKEND_URL}/status`;
+const STATUS_INTERVAL_MS = 1000; // Check status every 1 second
 
 function CameraFeed() {
-    const [isServiceRunning, setIsServiceRunning] = useState(false); 
+    const [isServiceRunning, setIsServiceRunning] = useState(false);
     const [status, setStatus] = useState('inactive');
-    const [message, setMessage] = useState('Press "Start Service" to begin attendance checks.');
-    const [framesSent, setFramesSent] = useState(0);
+    const [message, setMessage] = useState('Press "Start Attendance" to launch the service.');
     
-    const videoRef = useRef(null);
-    const canvasRef = useRef(null);
-    const captureIntervalRef = useRef(null); 
+    // Ref for the status polling interval
+    const statusIntervalRef = useRef(null);
 
-    // --- FUNCTION TO CAPTURE AND SEND A SINGLE FRAME VIA POST ---
-    const sendFrame = useCallback(async () => {
-        if (!isServiceRunning || status === 'marked') {
-            return;
-        }
-
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        
-        if (!video || !canvas || video.paused || video.ended) {
-            return;
-        }
-
-        // 1. Capture frame from video to canvas
-        const context = canvas.getContext('2d');
-        // Use video dimensions for accurate capture
-        canvas.width = video.videoWidth; 
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // 2. Convert canvas image to Blob object (JPEG format)
-        canvas.toBlob(async (blob) => {
-            if (!blob) {
-                console.error("Failed to create Blob from canvas.");
-                return;
+    // --- Status Polling Logic ---
+    const checkStatus = useCallback(async () => {
+        try {
+            const response = await fetch(STATUS_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP status ${response.status}`);
             }
+            const data = await response.json();
+            
+            setStatus(data.status);
+            setMessage(data.message);
 
-            // 3. Create FormData object to send as a file
-            const formData = new FormData();
-            formData.append('frame', blob, 'frame.jpg');
-
-            try {
-                // 4. Send the frame to the Flask server
-                const response = await fetch(UPLOAD_URL, {
-                    method: 'POST',
-                    body: formData,
-                    // Note: Browser automatically sets Content-Type: multipart/form-data
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                
-                // 5. Update UI based on server response
-                setStatus(data.status);
-                setMessage(data.message);
-                setFramesSent(prev => prev + 1);
-
-                if (data.status === 'marked') {
-                    // Stop the service once marked
-                    clearInterval(captureIntervalRef.current);
-                    setIsServiceRunning(false); 
-                }
-
-            } catch (e) {
-                console.error("Frame upload error:", e);
-                setMessage(`[ERROR] Server connection failed or processing error: ${e.message}`);
-            }
-        }, 'image/jpeg'); // Specify output format
-    }, [isServiceRunning, status]);
-
-    // --- EFFECT: CAMERA ACCESS & CAPTURE LOOP ---
-    useEffect(() => {
-        if (!isServiceRunning) {
-            // Cleanup: Stop the stream and interval
-            if (videoRef.current && videoRef.current.srcObject) {
-                videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-            }
-            clearInterval(captureIntervalRef.current);
-            return;
-        }
-
-        async function startCameraAndCaptureLoop() {
-            try {
-                // 1. Request camera access
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        // Try simplifying the request first for better compatibility
-                        video: true, 
-                        // Fallback/Option: facingMode: 'environment' 
-                    }
-                });
-
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                }
-                
-                // 2. Start the continuous capture and send loop
-                // Wait for the video to start playing before capturing frames
-                videoRef.current.onloadedmetadata = () => {
-                    videoRef.current.play();
-                    captureIntervalRef.current = setInterval(sendFrame, FRAME_INTERVAL_MS);
-                };
-
-                setMessage('Camera opened successfully. Analyzing frames...');
-
-            } catch (err) {
-                console.error("Error accessing the camera: ", err);
-                setMessage("ERROR: Camera access denied. Check browser permissions and secure (HTTPS) context.");
-                setStatus('error');
+            // Logic to stop the service after attendance is marked
+            if (data.status === 'marked' || data.status === 'error') {
+                clearInterval(statusIntervalRef.current);
                 setIsServiceRunning(false);
             }
+        } catch (error) {
+            console.error("Status check error:", error);
+            // If the backend is completely offline (e.g., CORS/Network failure)
+            setMessage('Backend service connection lost. Please check Flask server.');
+            setStatus('error');
+            clearInterval(statusIntervalRef.current);
+            setIsServiceRunning(false);
         }
-        
-        startCameraAndCaptureLoop();
-        
-        return () => {
-            // Cleanup on unmount/stop
-            if (videoRef.current && videoRef.current.srcObject) {
-                videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-            }
-            clearInterval(captureIntervalRef.current);
-        };
-    }, [isServiceRunning, sendFrame]);
+    }, []);
 
-    // Handler for the Start button
+    // --- Service Control & Status Polling Effect ---
+    useEffect(() => {
+        if (isServiceRunning) {
+            setMessage('Service is starting... Waiting for video stream.');
+            
+            // Start polling the backend status
+            statusIntervalRef.current = setInterval(checkStatus, STATUS_INTERVAL_MS);
+        } else {
+            // Cleanup: stop polling when the service is inactive
+            clearInterval(statusIntervalRef.current);
+        }
+
+        // Cleanup function on unmount
+        return () => {
+            clearInterval(statusIntervalRef.current);
+        };
+    }, [isServiceRunning, checkStatus]);
+
+    // --- Handlers ---
     const handleStartService = () => {
         setIsServiceRunning(true);
-        setStatus('active');
-        setMessage('System is initializing... Attempting to open mobile camera.');
+        setStatus('starting');
+        setMessage('Attempting to connect to the video feed...');
     };
-    
-    // --- RENDER FUNCTION ---
+
+    const handleStopService = () => {
+        // Manually stop the service
+        setIsServiceRunning(false);
+        setStatus('inactive');
+        setMessage('Service manually stopped. Press "Start Attendance" to relaunch.');
+    };
+
+    // --- Render Component ---
     return (
-        <div className="camera-container">
-            <h1>Attendance Mark System</h1>
+        <div className="camera-container" style={styles.container}>
+            <h1>Live Attendance Stream</h1>
             
-            <div className={`status-box ${status}`}>
+            <div 
+                className={`status-box ${status}`} 
+                style={{...styles.statusBox, backgroundColor: status === 'active' ? '#4CAF50' : status === 'marked' ? '#2196F3' : '#F44336'}}
+            >
                 Status: <strong>{status.toUpperCase()}</strong>
                 <p>{message}</p>
-                <p>Frames Sent: {framesSent}</p>
-                {status === 'active' && <p>Please ensure your face is visible and blink for the liveness check.</p>}
             </div>
 
-            {!isServiceRunning && status !== 'marked' && status !== 'error' && (
-                <button 
-                    onClick={handleStartService} 
-                    className="start-button"
-                >
-                    ▶️ Start Attendance Service
-                </button>
-            )}
-            
-            <div className="video-feed" style={{ position: 'relative' }}>
-                {isServiceRunning ? (
-                    // 1. Video element shows the live stream from the mobile camera
-                    <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline 
-                        muted 
-                        className="live-stream"
-                        style={{ width: '100%', maxWidth: '500px', borderRadius: '5px' }}
-                    />
+            <div style={styles.buttonGroup}>
+                {!isServiceRunning ? (
+                    <button 
+                        onClick={handleStartService} 
+                        style={styles.startButton}
+                        disabled={status === 'starting'}
+                    >
+                        ▶️ Start Attendance Service
+                    </button>
                 ) : (
-                    <div className="placeholder">
-                        <h2>Service Stopped</h2>
-                    </div>
+                    <button 
+                        onClick={handleStopService} 
+                        style={styles.stopButton}
+                    >
+                        ⏹️ Stop Service
+                    </button>
                 )}
             </div>
             
-            {/* 2. Hidden Canvas for capturing frames */}
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            <div style={styles.videoFeed}>
+                {isServiceRunning && status !== 'error' ? (
+                    // The core MJPEG implementation: The <img> tag consumes the /video_feed route
+                    <img
+                        src={VIDEO_FEED_URL}
+                        alt="Live Video Stream"
+                        style={styles.liveStream}
+                        // The 'key' forces the image to reload if the URL changes, 
+                        // though here it helps ensure a fresh stream connection.
+                        key={isServiceRunning} 
+                    />
+                ) : (
+                    <div style={styles.placeholder}>
+                        <h2>{status === 'marked' ? "ATTENDANCE MARKED" : "Service Offline"}</h2>
+                        <p>{status === 'marked' ? "System shut down." : "Press Start to begin stream."}</p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
+
+// Basic Inline Styles for clarity (You should move this to a CSS file)
+const styles = {
+    container: { textAlign: 'center', padding: '20px', fontFamily: 'Arial, sans-serif' },
+    statusBox: { padding: '10px', margin: '20px auto', width: '80%', maxWidth: '500px', borderRadius: '5px', color: 'white' },
+    buttonGroup: { margin: '20px 0' },
+    startButton: { padding: '10px 20px', fontSize: '16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' },
+    stopButton: { padding: '10px 20px', fontSize: '16px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' },
+    videoFeed: { margin: '20px auto', maxWidth: '640px', border: '1px solid #ccc', borderRadius: '5px' },
+    liveStream: { width: '100%', height: 'auto', display: 'block' },
+    placeholder: { padding: '50px 20px', backgroundColor: '#eee', borderRadius: '5px' }
+};
 
 export default CameraFeed;
