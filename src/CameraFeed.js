@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 
 // Backend runs on local network
-const BACKEND_IP = "192.168.1.8"; // ⚠️ CHANGE THIS TO YOUR IP!
+const BACKEND_IP = "https://3d74a0e0cdc0.ngrok-free.app"; // ⚠️ CHANGE THIS TO YOUR IP!
 const STATUS_URL = `http://${BACKEND_IP}:5000/status`;
 const UPLOAD_URL = `http://${BACKEND_IP}:5000/process_frame`;
 
